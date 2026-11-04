@@ -4378,6 +4378,7 @@ status_t AudioPolicyManager::registerPolicyMixes(const std::vector<AudioMix>& mi
     ALOGV("registerPolicyMixes() %zu mix(es)", mixes.size());
     status_t res = NO_ERROR;
     bool checkOutputs = false;
+    bool invalidateRunningTracks = false;
     sp<HwModule> rSubmixModule;
     std::vector<AudioMix> registeredMixes;
     AudioDeviceTypeAddrVector devices;
@@ -4468,6 +4469,9 @@ status_t AudioPolicyManager::registerPolicyMixes(const std::vector<AudioMix>& mi
                     break;
                 }
             }
+            if (mix.mMixType == MIX_TYPE_PLAYERS) {
+                invalidateRunningTracks = true;
+            }
         } else if ((mix.mRouteFlags & MIX_ROUTE_FLAG_RENDER) == MIX_ROUTE_FLAG_RENDER) {
             String8 address = mix.mDeviceAddress;
             audio_devices_t type = mix.mDeviceType;
@@ -4543,6 +4547,10 @@ status_t AudioPolicyManager::registerPolicyMixes(const std::vector<AudioMix>& mi
         updateCallAndOutputRouting(false /* forceVolumeReeval */, 0 /* delayMs */,
             true /* skipDelays */);
         changeOutputDevicesMuteState(devices);
+    }
+    if (res == NO_ERROR && invalidateRunningTracks) {
+        // Re-route already-running media/game tracks into the new loopback mix.
+        invalidateStreams({AUDIO_STREAM_MUSIC});
     }
     return res;
 }
