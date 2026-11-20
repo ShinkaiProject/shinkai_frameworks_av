@@ -1,0 +1,23 @@
+// Voice Changer microphone effect for Game Space.
+package {
+    default_applicable_licenses: ["frameworks_av_license"],
+}
+
+cc_library_shared {
+    name: "libvoicechangeraidl",
+    defaults: ["aidlaudioeffectservice_defaults"],
+    srcs: [
+        "VoiceChangerProcessor.cpp",
+        "VoiceChangerImpl.cpp",
+    ],
+    shared_libs: [
+        "libaudioutils",
+        "libcutils",
+        "liblog",
+    ],
+    relative_install_path: "soundfx",
+    visibility: [
+        "//hardware/interfaces/audio/aidl/default:__subpackages__",
+        ":__subpackages__",
+    ],
+}

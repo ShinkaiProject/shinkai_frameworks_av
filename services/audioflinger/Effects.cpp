@@ -2371,7 +2371,12 @@ void EffectChain::process_l() {
     }
 
     size_t size = mEffects.size();
-    if (doProcess) {
+    // Record thread chains are created without input/output buffers since pre and post
+    // processing effects are processed by the input stream in the HAL (see
+    // EffectModule::addEffectToHal_l()). Do not attempt to process them from here, as this
+    // can happen for device effects using the global AUDIO_SESSION_DEVICE session.
+    const bool hasBuffers = mInBuffer != nullptr && mOutBuffer != nullptr;
+    if (doProcess && hasBuffers) {
         // Only the input and output buffers of the chain can be external,
         // and 'update' / 'commit' do nothing for allocated buffers, thus
         // it's not needed to consider any other buffers here.
@@ -2397,6 +2402,24 @@ void EffectChain::process_l() {
     if (doResetVolume) {
         resetVolume_l();
     }
+}
+
+void EffectChain::setInOutBuffer_l(const sp<EffectBufferHalInterface>& buffer) {
+    mInBuffer = buffer;
+    mOutBuffer = buffer;
+    for (size_t i = 0; i < mEffects.size(); i++) {
+        mEffects[i]->setInBuffer(buffer);
+        mEffects[i]->setOutBuffer(buffer);
+    }
+}
+
+bool EffectChain::hasSoftwareEffect_l() const {
+    for (const auto& effect : mEffects) {
+        if (effect->isImplementationSoftware()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 status_t EffectChain::createEffect(sp<IAfEffectModule>& effect,
@@ -3640,6 +3663,19 @@ NO_THREAD_SAFETY_ANALYSIS
     }
 
     if (status == NO_ERROR || status == ALREADY_EXISTS) {
+        // Replay the parameters previously set by clients on the newly created effect module.
+        std::vector<std::vector<uint8_t>> replayParams;
+        {
+            audio_utils::lock_guard _l(proxyMutex());
+            replayParams = mLastSetParams;
+        }
+        sp<IAfEffectBase> effect = (*handle)->effect().promote();
+        if (effect != nullptr) {
+            for (const auto& param : replayParams) {
+                std::vector<uint8_t> reply;
+                effect->command(EFFECT_CMD_SET_PARAM, param, sizeof(int), &reply);
+            }
+        }
         Status bs;
         if (isEnabled()) {
             bs = (*handle)->asIEffect()->enable(&status);
@@ -3699,6 +3735,9 @@ status_t DeviceEffectProxy::command(
     audio_utils::lock_guard _l(proxyMutex());
     status_t status = EffectBase::command(cmdCode, cmdData, maxReplySize, reply);
     if (status == NO_ERROR) {
+        if (cmdCode == EFFECT_CMD_SET_PARAM) {
+            cacheSetParam_l(cmdData);
+        }
         for (auto& handle : mEffectHandles) {
             sp<IAfEffectBase> effect = handle.second->effect().promote();
             if (effect != nullptr) {
@@ -3708,6 +3747,33 @@ status_t DeviceEffectProxy::command(
     }
     ALOGV("%s status %d", __func__, status);
     return status;
+}
+
+void DeviceEffectProxy::cacheSetParam_l(const std::vector<uint8_t>& cmdData) {
+    constexpr size_t kMaxCachedSetParams = 16;
+    if (cmdData.size() < sizeof(effect_param_t)) {
+        return;
+    }
+    const effect_param_t* const param =
+            reinterpret_cast<const effect_param_t*>(cmdData.data());
+    if (param->psize < sizeof(uint32_t)
+            || cmdData.size() < sizeof(effect_param_t) + param->psize + param->vsize) {
+        return;
+    }
+    const uint32_t paramId = *reinterpret_cast<const uint32_t*>(param->data);
+    for (auto& cached : mLastSetParams) {
+        const effect_param_t* const cachedParam =
+                reinterpret_cast<const effect_param_t*>(cached.data());
+        if (cachedParam->psize >= sizeof(uint32_t)
+                && *reinterpret_cast<const uint32_t*>(cachedParam->data) == paramId) {
+            cached = cmdData;
+            return;
+        }
+    }
+    if (mLastSetParams.size() >= kMaxCachedSetParams) {
+        mLastSetParams.erase(mLastSetParams.begin());
+    }
+    mLastSetParams.push_back(cmdData);
 }
 
 bool DeviceEffectProxy::isOutput() const {

@@ -8940,6 +8940,11 @@ reacquire_wakelock:
         ALOG_ASSERT(framesRead > 0);
         mFramesRead += framesRead;
 
+        // Process device effect chains in AudioFlinger: the input HAL stream is not
+        // guaranteed to process effects added with Stream::addEffect().
+        processDeviceEffectChains(effectChains,
+                (uint8_t*)mRsmpInBuffer + rear * mFrameSize, (size_t)framesRead);
+
 #ifdef TEE_SINK
         (void)mTee.write((uint8_t*)mRsmpInBuffer + rear * mFrameSize, framesRead);
 #endif
@@ -9937,6 +9942,61 @@ void RecordThread::checkBtNrec_l()
             setEffectSuspended_l(FX_IID_NS, suspend, mEffectChains[i]->sessionId());
         }
     }
+}
+
+void RecordThread::processDeviceEffectChains(
+        const std::vector<sp<IAfEffectChain>>& effectChains, void* buffer, size_t frames)
+{
+    // AudioFlinger only processes device effect chains with a global session (for example
+    // AUDIO_SESSION_DEVICE effects attached to an input device). Session effects are left
+    // to the HAL as before.
+    bool hasDeviceEffectChain = false;
+    for (const auto& chain : effectChains) {
+        if (audio_is_global_session(chain->sessionId()) && chain->hasSoftwareEffect_l()) {
+            hasDeviceEffectChain = true;
+            break;
+        }
+    }
+    if (!hasDeviceEffectChain) {
+        return;
+    }
+    if (mFormat != AUDIO_FORMAT_PCM_16_BIT) {
+        ALOGW("%s unsupported capture format %#x, skipping effect processing",
+                __func__, mFormat);
+        return;
+    }
+    ALOG_ASSERT(frames <= mFrameCount);
+    const size_t channels = mChannelCount;
+    const size_t needed = mFrameCount * channels * sizeof(float);
+    if (mDeviceEffectBuffer == nullptr || mDeviceEffectBuffer->getSize() < needed) {
+        sp<EffectBufferHalInterface> newBuffer;
+        status_t status = mAfThreadCallback->getEffectsFactoryHal()->allocateBuffer(
+                needed, &newBuffer);
+        if (status != NO_ERROR || newBuffer == nullptr) {
+            ALOGW("%s failed to allocate effect buffer: %d", __func__, status);
+            return;
+        }
+        memset(newBuffer->audioBuffer()->raw, 0, needed);
+        mDeviceEffectBuffer = newBuffer;
+    }
+
+    const size_t samples = frames * channels;
+    float* const f32 = mDeviceEffectBuffer->audioBuffer()->f32;
+    // Zero the tail so that effects never process stale data when the HAL returns
+    // fewer frames than the configured effect frame count.
+    memset(f32, 0, needed);
+    memcpy_to_float_from_i16(f32, static_cast<const int16_t*>(buffer), samples);
+
+    for (const auto& chain : effectChains) {
+        if (!audio_is_global_session(chain->sessionId()) || !chain->hasSoftwareEffect_l()) {
+            continue;
+        }
+        chain->setInOutBuffer_l(mDeviceEffectBuffer);
+        chain->process_l();
+        chain->setInOutBuffer_l(nullptr);
+    }
+
+    memcpy_to_i16_from_float(static_cast<int16_t*>(buffer), f32, samples);
 }
 
 

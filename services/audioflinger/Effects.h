@@ -476,6 +476,10 @@ public:
 
     void process_l() final REQUIRES(audio_utils::EffectChain_Mutex);
 
+    void setInOutBuffer_l(const sp<EffectBufferHalInterface>& buffer) final
+            REQUIRES(audio_utils::EffectChain_Mutex);
+    bool hasSoftwareEffect_l() const final REQUIRES(audio_utils::EffectChain_Mutex);
+
     audio_utils::mutex& mutex() const final RETURN_CAPABILITY(audio_utils::EffectChain_Mutex) {
         return mMutex;
     }
@@ -887,6 +891,11 @@ private:
     status_t checkPort(const IAfPatchPanel::Patch& patch,
             const struct audio_port_config* port, sp<IAfEffectHandle>* handle);
 
+    // Keep the last SET_PARAM commands from clients so that they can be replayed
+    // on effect modules created for new patches.
+    void cacheSetParam_l(const std::vector<uint8_t>& cmdData)
+            REQUIRES(audio_utils::DeviceEffectProxy_ProxyMutex);
+
     const AudioDeviceTypeAddr mDevice;
     const sp<DeviceEffectManagerCallback> mManagerCallback;
     const sp<ProxyCallback> mMyCallback;
@@ -898,6 +907,7 @@ private:
     mutable audio_utils::mutex mProxyMutex{
             audio_utils::MutexOrder::kDeviceEffectProxy_ProxyMutex};
     std::map<audio_patch_handle_t, sp<IAfEffectHandle>> mEffectHandles; // protected by mProxyMutex
+    std::vector<std::vector<uint8_t>> mLastSetParams; // protected by mProxyMutex
     sp<IAfEffectModule> mHalEffect; // protected by mProxyMutex
     struct audio_port_config mDevicePort = { .id = AUDIO_PORT_HANDLE_NONE };
     const bool mNotifyFramesProcessed;

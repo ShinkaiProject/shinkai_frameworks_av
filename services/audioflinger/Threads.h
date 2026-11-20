@@ -2228,9 +2228,18 @@ private:
 
     void checkBtNrec_l() REQUIRES(mutex());
 
+    // Processes device effect chains (global session) on the capture path if the HAL
+    // does not implement input stream effect processing. The buffer is processed in place.
+    // Must be called with the effect chains mutexes locked.
+    void processDeviceEffectChains(
+            const std::vector<sp<IAfEffectChain>>& effectChains, void* buffer, size_t frames)
+            NO_THREAD_SAFETY_ANALYSIS;
+
     int32_t getOldestFront_l() REQUIRES(mutex());
     void updateFronts_l(int32_t offset) REQUIRES(mutex());
             Source                              *mSource;
+            // buffer for processing device effect chains in AudioFlinger
+            sp<EffectBufferHalInterface>        mDeviceEffectBuffer;
             // mActiveTracks has dual roles:  it indicates the current active track(s), and
             // is used together with mStartStopCV to indicate start()/stop() progress
     ContainerView<decltype(mActiveTracks), sp<IAfRecordTrack>>

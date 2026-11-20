@@ -279,6 +279,13 @@ public:
     virtual void setOutBuffer(const sp<EffectBufferHalInterface>& buffer) = 0;
     virtual float *outBuffer() const = 0;
 
+    // Assign the same buffer as input and output for the chain and all its effects,
+    // or null to detach the buffer from all effects.
+    virtual void setInOutBuffer_l(const sp<EffectBufferHalInterface>& buffer)
+            REQUIRES(audio_utils::EffectChain_Mutex) = 0;
+    // Whether the chain contains at least one software implemented effect.
+    virtual bool hasSoftwareEffect_l() const REQUIRES(audio_utils::EffectChain_Mutex) = 0;
+
     virtual void incTrackCnt() = 0;
     virtual void decTrackCnt() = 0;
     virtual int32_t trackCnt() const = 0;
