@@ -2042,18 +2042,30 @@ uint32_t AudioFlinger::getInputFramesLost(audio_io_handle_t ioHandle) const
 
 status_t AudioFlinger::listAppVolumes(std::vector<media::AppVolume> *vols)
 {
+    VALUE_OR_RETURN_CONVERTED(enforceCallingPermission(PermissionEnum::MODIFY_AUDIO_ROUTING));
+    if (vols == nullptr) {
+        return BAD_VALUE;
+    }
     audio_utils::lock_guard _l(mutex());
     return mAppVolumeHelper.listVolumes(vols, mPlaybackThreads);
 }
 
 status_t AudioFlinger::setAppVolume(const String8& packageName, const float value)
 {
+    VALUE_OR_RETURN_CONVERTED(enforceCallingPermission(PermissionEnum::MODIFY_AUDIO_ROUTING));
+    if (packageName.empty() || !(value >= 0.f && value <= 1.f)) {
+        return BAD_VALUE;
+    }
     audio_utils::lock_guard _l(mutex());
     return mAppVolumeHelper.setVolume(packageName, value, mPlaybackThreads);
 }
 
 status_t AudioFlinger::setAppMute(const String8& packageName, const bool value)
 {
+    VALUE_OR_RETURN_CONVERTED(enforceCallingPermission(PermissionEnum::MODIFY_AUDIO_ROUTING));
+    if (packageName.empty()) {
+        return BAD_VALUE;
+    }
     audio_utils::lock_guard _l(mutex());
     return mAppVolumeHelper.setMute(packageName, value, mPlaybackThreads);
 }

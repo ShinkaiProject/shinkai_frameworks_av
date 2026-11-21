@@ -49,11 +49,14 @@ public:
         }
         auto it = mConfigs.find(packageName);
         if (it == mConfigs.end()) {
+            if (value == 1.0f) return NO_ERROR;
             media::AppVolume vol;
             vol.packageName = packageName;
             vol.volume = value;
             vol.muted = false;
             mConfigs[packageName] = vol;
+        } else if (value == 1.0f && !it->second.muted) {
+            mConfigs.erase(it);
         } else {
             it->second.volume = value;
         }
@@ -67,11 +70,14 @@ public:
         }
         auto it = mConfigs.find(packageName);
         if (it == mConfigs.end()) {
+            if (!value) return NO_ERROR;
             media::AppVolume vol;
             vol.packageName = packageName;
             vol.volume = 1.0f;
             vol.muted = value;
             mConfigs[packageName] = vol;
+        } else if (!value && it->second.volume == 1.0f) {
+            mConfigs.erase(it);
         } else {
             it->second.muted = value;
         }
